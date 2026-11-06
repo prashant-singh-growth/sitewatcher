@@ -1,0 +1,31 @@
+'use client';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { useApp } from '../../../ui/context';
+import { Badge, Btn, Card, Empty, ErrorBox, Kpi, LineChart, ScoreRing, Select, Skeleton, StatusBadge, Table, call, fmtDate, fmtDur, fmtMs, useAsync } from '../../../ui/kit';
+
+const RANGES: Record<string, number> = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 };
+export default function WebsiteDetail() {
+  const id = Number(useParams<{ id: string }>().id); const { user } = useApp(); const tz = user.timezone;
+  const [range, setRange] = useState('7d'); const [status, setStatus] = useState(''); const [extra, setExtra] = useState<any[]>([]); const [more, setMore] = useState<number | null>(null);
+  const site = useAsync(() => call(`/api/sites/${id}`), [id]);
+  const series = useAsync(() => call(`/api/sites/${id}/series?from=${new Date(Date.now() - RANGES[range] * 86400000).toISOString()}`), [id, range]);
+  const hist = useAsync(async () => { const d = await call(`/api/sites/${id}/history?limit=50${status ? `&status=${status}` : ''}`); setExtra([]); setMore(d.nextBefore); return d; }, [id, status]);
+  const speed = useAsync(() => call(`/api/speedtest?siteId=${id}&limit=40`).catch(() => ({ audits: [] })), [id]);
+  const s = site.data?.site;
+  if (site.loading && !s) return <Skeleton rows={5} />; if (site.error) return <ErrorBox error={site.error} retry={site.reload} />;
+  const latest = (dev: string) => speed.data?.audits.find((a: any) => a.device === dev && a.status === 'success');
+  const loadMore = async () => { const d = await call(`/api/sites/${id}/history?limit=50&before=${more}${status ? `&status=${status}` : ''}`); setExtra(x => [...x, ...d.checks]); setMore(d.nextBefore); };
+  const checks = [...(hist.data?.checks ?? []), ...extra];
+  const sr: any[] = series.data?.series ?? [];
+  const avgUp = sr.length ? Math.round((sr.reduce((a, x) => a + (x.uptime_pct ?? 0) * x.checks, 0) / Math.max(1, sr.reduce((a, x) => a + x.checks, 0))) * 10) / 10 : null;
+  return <div className="sw-page"><div className="sw-page-head"><div><p className="eyebrow"><Link href="/websites" className="sw-link">WEBSITES</Link></p><h1>{s.name} <StatusBadge active={s.is_active} up={s.is_up} /></h1><p className="muted"><a href={s.url} target="_blank" rel="noreferrer noopener">{s.url}</a></p></div><div className="sw-actions"><Link className="sw-btn ghost" href="/speed-test">Run speed test</Link><Link className="sw-btn ghost" href="/reports">Create report</Link></div></div>
+    <div className="sw-kpis"><Kpi label="LAST RESPONSE" value={fmtMs(s.response_ms)} /><Kpi label={`UPTIME (${range})`} value={avgUp == null ? '—' : `${avgUp}%`} tone={avgUp != null && avgUp < 99 ? 'red' : 'green'} /><Kpi label="CHECK INTERVAL" value={`${s.eff_interval_minutes} min`} note={s.o_interval_minutes == null ? 'Project default' : 'Custom for this site'} /><Kpi label="OPEN INCIDENTS" value={s.open_incidents} tone="amber" /><Kpi label="NEXT CHECK" value={s.is_active ? (s.next_run_at ? fmtDate(s.next_run_at, tz).split(',').pop() : '—') : 'Paused'} /></div>
+    <Card title="Response time" subtitle="Average of successful checks" actions={<Select value={range} onChange={e => setRange(e.target.value)} aria-label="Range">{Object.keys(RANGES).map(r => <option key={r}>{r}</option>)}</Select>}><LineChart tz={tz} unit=" ms" series={[{ name: 'Average', color: '#4f65e8', points: sr.map(x => ({ x: x.t, y: x.avg_ms })) }, { name: 'Slowest', color: '#d84c55', points: sr.map(x => ({ x: x.t, y: x.max_ms })) }]} /></Card>
+    <div className="sw-grid-2">
+      <Card title="Latest Lighthouse" subtitle="Lab data from Google PageSpeed Insights" actions={<Link href="/performance" className="text-btn">History</Link>}>{!latest('mobile') && !latest('desktop') ? <Empty title="No speed tests yet" text="Run one from the Speed Test page." /> : <div className="sw-rings-2">{(['mobile', 'desktop'] as const).map(dev => { const a = latest(dev); return <div key={dev}><h4>{dev}</h4>{a ? <><div className="sw-rings"><ScoreRing label="Perf" value={a.performance_score} /><ScoreRing label="A11y" value={a.accessibility_score} /><ScoreRing label="Best" value={a.best_practices_score} /><ScoreRing label="SEO" value={a.seo_score} /></div><p className="muted small">LCP {fmtMs(a.lcp_ms)} · CLS {a.cls ?? 'n/a'} · {fmtDate(a.audited_at, tz)}</p></> : <p className="muted">No test</p>}</div>; })}</div>}</Card>
+      <Card title="Incident timeline" flush>{!hist.data?.incidents?.length ? <Empty title="No incidents" text="This website has not gone down since monitoring began." /> : <ul className="sw-timeline">{hist.data.incidents.map((i: any) => <li key={i.id} className={i.resolved_at ? 'done' : 'open'}><b>{i.resolved_at ? 'Resolved' : 'Ongoing'} · {fmtDur(i.duration_seconds)}</b><span>{fmtDate(i.started_at, tz)}{i.resolved_at ? ` → ${fmtDate(i.resolved_at, tz)}` : ''} · {i.failure_count} failed check(s)</span><small>{i.last_error}</small>{i.notifications?.length > 0 && <small>Emails: {i.notifications.map((n: any) => `${n.type} ${n.status}`).join(', ')}</small>}</li>)}</ul>}</Card></div>
+    <Card title="Check history" flush actions={<Select value={status} onChange={e => setStatus(e.target.value)} aria-label="Status filter"><option value="">All results</option><option value="up">Up only</option><option value="down">Down only</option></Select>}>
+      {hist.loading && !hist.data ? <Skeleton /> : !checks.length ? <Empty title="No checks yet" text="Results appear after the first cron run." /> : <><Table head={['Time', 'Result', 'HTTP', 'Response', 'Attempts', 'Error']}>{checks.map((c: any) => <tr key={c.id}><td>{fmtDate(c.checked_at, tz)}</td><td><Badge tone={c.is_up ? 'green' : 'red'}>{c.is_up ? 'UP' : 'DOWN'}</Badge></td><td>{c.status_code ?? '—'}</td><td>{fmtMs(c.response_ms)}</td><td>{c.attempts}</td><td className="muted small">{c.error_message ? c.error_message.slice(0, 90) : c.incident_id ? `Incident #${c.incident_id}` : ''}</td></tr>)}</Table>{more && <div className="pad center"><Btn kind="ghost" onClick={loadMore}>Load older checks</Btn></div>}</>}</Card></div>;
+}

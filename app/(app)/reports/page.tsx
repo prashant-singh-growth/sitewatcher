@@ -1,0 +1,51 @@
+'use client';
+import { useState } from 'react';
+import { useApp } from '../../ui/context';
+import { Badge, Btn, Card, Empty, ErrorBox, Field, Input, Select, Skeleton, Table, Tabs, call, download, fmtDate, toLocalInput, useAsync, useToast } from '../../ui/kit';
+
+const SECTIONS: [string, string][] = [['summary', 'Summary'], ['uptime', 'Uptime'], ['response', 'Response time'], ['incidents', 'Incidents'], ['speed', 'Lighthouse scores'], ['comparison', 'Historical changes'], ['recommendations', 'Recommendations']];
+const PRESETS: [string, string][] = [['24h', 'Last 24 hours'], ['7d', 'Last 7 days'], ['15d', 'Last 15 days'], ['30d', 'Last 30 days'], ['90d', 'Last 90 days'], ['custom', 'Custom range']];
+
+export default function Reports() {
+  const { project, projectId, user, features, can } = useApp(); const tz = user.timezone; const toast = useToast();
+  const perms = useAsync(() => (projectId ? call(`/api/projects/${projectId}`) : Promise.resolve(null)), [projectId]);
+  const has = (p: string) => perms.data?.permissions?.includes(p);
+  const sitesQ = useAsync(() => (projectId ? call(`/api/sites?projectId=${projectId}`) : Promise.resolve({ sites: [] })), [projectId]);
+  const hist = useAsync(() => (projectId ? call(`/api/reports?projectId=${projectId}`) : Promise.resolve({ reports: [] })), [projectId]);
+  const sch = useAsync(() => (projectId ? call(`/api/reports/schedules?projectId=${projectId}`) : Promise.resolve({ schedules: [] })), [projectId]);
+  const [tab, setTab] = useState('generate'); const [busy, setBusy] = useState(''); const [err, setErr] = useState('');
+  const [f, setF] = useState({ siteId: '', preset: '30d', from: toLocalInput(new Date(Date.now() - 30 * 86400000)), to: toLocalInput(new Date()), title: 'Website Performance Report', sections: SECTIONS.map(s => s[0]), recipients: '', subject: '', message: '' });
+  const [s, setS] = useState({ name: 'Monthly client report', frequency: 'monthly', every_days: '14', period_days: '', recipients: '', subject: '', message: '' });
+  const body = () => ({ projectId, siteId: f.siteId ? Number(f.siteId) : undefined, ...(f.preset === 'custom' ? { from: new Date(f.from).toISOString(), to: new Date(f.to).toISOString() } : { preset: f.preset }), sections: f.sections, title: f.title });
+  const toggle = (k: string) => setF(x => ({ ...x, sections: x.sections.includes(k) ? x.sections.filter(y => y !== k) : [...x.sections, k] }));
+  const generate = async () => { setBusy('pdf'); setErr(''); try { await download('/api/reports', body(), 'report.pdf'); toast('PDF downloaded.'); hist.reload(true as any); } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(''); } };
+  const email = async () => { setBusy('mail'); setErr(''); try { await call('/api/reports/email', 'POST', { ...body(), recipients: f.recipients, subject: f.subject || undefined, message: f.message || undefined }); toast('Report emailed.'); hist.reload(true as any); } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(''); } };
+  const addSchedule = async (e: React.FormEvent) => { e.preventDefault(); setBusy('sch'); try { await call('/api/reports/schedules', 'POST', { projectId, siteId: f.siteId ? Number(f.siteId) : undefined, sections: f.sections, name: s.name, frequency: s.frequency, every_days: s.frequency === 'custom' ? Number(s.every_days) : undefined, period_days: s.period_days ? Number(s.period_days) : undefined, recipients: s.recipients, subject: s.subject || undefined, message: s.message || undefined }); toast('Schedule created.'); sch.reload(true as any); } catch (e2) { toast(e2 instanceof Error ? e2.message : 'Failed', 'err'); } finally { setBusy(''); } };
+  const sites: any[] = sitesQ.data?.sites ?? [];
+  if (!projectId) return <div className="sw-page"><Empty title="No project selected" text="Select or create a project to build reports." /></div>;
+  const scope = <Field label="Scope"><Select value={f.siteId} onChange={e => setF({ ...f, siteId: e.target.value })}><option value="">Entire project ({project?.name})</option>{sites.map(x => <option key={x.id} value={x.id}>Website: {x.name}</option>)}</Select></Field>;
+  const sectionBox = <div className="full"><span className="sw-label">Include</span><div className="sw-chips">{SECTIONS.map(([k, l]) => <label key={k} className="sw-check"><input type="checkbox" checked={f.sections.includes(k)} onChange={() => toggle(k)} />{l}</label>)}</div></div>;
+  return <div className="sw-page"><div className="sw-page-head"><div><p className="eyebrow">ANALYTICS</p><h1>Reports</h1><p className="muted">Branded PDF reports for a single website or a whole project, generated on the server.</p></div></div>
+    <Tabs value={tab} onChange={setTab} tabs={[['generate', 'Generate'], ['history', 'History'], ['schedules', 'Scheduled emails']]} />
+    {tab === 'generate' && <Card title="New report"><div className="sw-form cols">{scope}
+      <Field label="Period"><Select value={f.preset} onChange={e => setF({ ...f, preset: e.target.value })}>{PRESETS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
+      {f.preset === 'custom' && <><Field label="From"><Input type="datetime-local" value={f.from} onChange={e => setF({ ...f, from: e.target.value })} /></Field><Field label="To"><Input type="datetime-local" value={f.to} onChange={e => setF({ ...f, to: e.target.value })} /></Field></>}
+      <Field label="Report title"><Input value={f.title} maxLength={200} onChange={e => setF({ ...f, title: e.target.value })} /></Field>{sectionBox}
+      <div className="sw-form-actions"><Btn busy={busy === 'pdf'} onClick={generate} disabled={!has('report.generate') || !f.sections.length}>Download PDF</Btn></div>
+      {has('report.email') && <><div className="sw-sub full"><h3>Email this report</h3></div>
+        <Field label="Recipients" hint="Comma separated, up to 10"><Input value={f.recipients} onChange={e => setF({ ...f, recipients: e.target.value })} placeholder="client@example.com, team@agency.com" /></Field><Field label="Subject (optional)"><Input value={f.subject} onChange={e => setF({ ...f, subject: e.target.value })} /></Field>
+        <Field label="Message (optional)"><textarea className="sw-input" rows={3} value={f.message} onChange={e => setF({ ...f, message: e.target.value })} /></Field>
+        <div className="sw-form-actions"><Btn kind="ghost" busy={busy === 'mail'} onClick={email} disabled={!f.recipients || !features.email || !f.sections.length}>Send PDF by email</Btn>{!features.email && <span className="muted small">SMTP is not configured on the server.</span>}</div></>}
+      </div><ErrorBox error={err} /></Card>}
+    {tab === 'history' && <Card title="Generated reports" flush>{hist.loading && !hist.data ? <Skeleton /> : !hist.data?.reports?.length ? <Empty title="No reports yet" text="Generate one from the first tab." /> :
+      <Table head={['Report', 'Scope', 'Period', 'Created', 'Emailed to', '']}>{hist.data.reports.map((r: any) => <tr key={r.id}><td><b>{r.title}</b>{r.schedule_id && <> <Badge tone="blue">scheduled</Badge></>}</td><td>{r.site_name || 'Entire project'}</td><td className="muted small">{fmtDate(r.period_from, tz)} → {fmtDate(r.period_to, tz)}</td><td className="muted">{fmtDate(r.created_at, tz)}<div className="small">{r.created_by_name}</div></td><td className="muted small">{r.emailed_to || '—'}</td><td><button className="text-btn" onClick={() => download(`/api/reports/${r.id}/download`, null, 'report.pdf').catch(e => toast(e.message, 'err'))}>Download</button></td></tr>)}</Table>}</Card>}
+    {tab === 'schedules' && <>{has('report.schedule') && <Card title="Schedule a recurring email" subtitle="Uses the scope and sections chosen on the Generate tab."><form className="sw-form cols" onSubmit={addSchedule}>
+      <Field label="Name"><Input required value={s.name} onChange={e => setS({ ...s, name: e.target.value })} /></Field>
+      <Field label="Frequency"><Select value={s.frequency} onChange={e => setS({ ...s, frequency: e.target.value })}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="custom">Custom interval</option></Select></Field>
+      {s.frequency === 'custom' && <Field label="Every (days)"><Input type="number" min={1} max={365} value={s.every_days} onChange={e => setS({ ...s, every_days: e.target.value })} /></Field>}
+      <Field label="Report covers last (days)" hint="Default: matches the frequency"><Input type="number" min={1} max={366} value={s.period_days} onChange={e => setS({ ...s, period_days: e.target.value })} /></Field>
+      <Field label="Recipients"><Input required value={s.recipients} onChange={e => setS({ ...s, recipients: e.target.value })} /></Field><Field label="Subject (optional)"><Input value={s.subject} onChange={e => setS({ ...s, subject: e.target.value })} /></Field>
+      <div className="sw-form-actions"><Btn busy={busy === 'sch'} disabled={!features.email}>Create schedule</Btn></div></form></Card>}
+      <Card title="Scheduled reports" flush>{!sch.data?.schedules?.length ? <Empty title="No scheduled reports" /> : <Table head={['Name', 'Scope', 'Frequency', 'Recipients', 'Next send', 'Last result', '']}>{sch.data.schedules.map((x: any) => <tr key={x.id}><td><b>{x.name}</b></td><td>{x.site_name || 'Project'}</td><td>{x.frequency === 'custom' ? `every ${x.every_days} d` : x.frequency}, last {x.period_days} d</td><td className="muted small">{x.recipients}</td><td>{x.is_active ? fmtDate(x.next_run_at, tz) : <Badge>Paused</Badge>}</td><td>{x.last_error ? <span className="red small">{x.last_error}</span> : x.last_run_at ? <span className="green small">Sent {fmtDate(x.last_run_at, tz)}</span> : '—'}</td>
+        <td className="row-actions">{has('report.schedule') && <><button onClick={async () => { await call(`/api/reports/schedules/${x.id}`, 'PATCH', { is_active: !x.is_active }).catch(e => toast(e.message, 'err')); sch.reload(true as any); }}>{x.is_active ? 'Ⅱ' : '▶'}</button><button onClick={async () => { if (confirm('Delete this schedule?')) { await call(`/api/reports/schedules/${x.id}`, 'DELETE').catch(e => toast(e.message, 'err')); sch.reload(true as any); } }}>×</button></>}</td></tr>)}</Table>}</Card></>}</div>;
+}

@@ -1,0 +1,19 @@
+'use client';
+import { useApp } from '../../ui/context';
+import { Badge, Card, Empty, ErrorBox, Kpi, Skeleton, StatusBadge, Table, call, fmtDate, fmtMs, ago, useAsync } from '../../ui/kit';
+
+export default function CronMonitor() {
+  const { project, projectId, user } = useApp(); const tz = user.timezone; const admin = user.role === 'super_admin';
+  const sites = useAsync(() => (projectId ? call(`/api/sites?projectId=${projectId}`) : Promise.resolve({ sites: [] })), [projectId]);
+  const logs = useAsync(() => (admin ? call('/api/cron/logs') : Promise.resolve(null)), [admin]);
+  const list: any[] = sites.data?.sites ?? []; const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain';
+  const lastRun = logs.data?.lastRunAt; const stale = admin && lastRun && Date.now() - new Date(lastRun).getTime() > 5 * 60_000;
+  return <div className="sw-page"><div className="sw-page-head"><div><p className="eyebrow">MONITORING</p><h1>Cron Monitor</h1><p className="muted">One Hostinger cron job runs every minute; only websites that are due are checked.</p></div></div>
+    <ErrorBox error={sites.error} retry={sites.reload} />
+    {admin && <div className="sw-kpis"><Kpi label="LAST CRON RUN" value={lastRun ? ago(lastRun) : 'never'} tone={stale || !lastRun ? 'red' : 'green'} note={stale ? 'Check the Hostinger cron job' : undefined} /><Kpi label="DUE RIGHT NOW" value={logs.data?.dueNow ?? '—'} /><Kpi label="LAST RUN CHECKED" value={logs.data?.logs?.[0]?.checked ?? '—'} /></div>}
+    <Card title="Schedule" subtitle={project ? `Next run for every website in ${project.name}` : undefined} flush>{sites.loading && !sites.data ? <Skeleton /> : !list.length ? <Empty title="No websites" text="Add websites to see their schedules." /> :
+      <Table head={['Website', 'Status', 'Interval', 'Timeout', 'Retries', 'Last check', 'Next check', 'Alerts']}>{list.map(s => <tr key={s.id}><td><b>{s.name}</b><div className="muted small">{s.eff_http_method} · expects {s.eff_expected_status}</div></td><td><StatusBadge active={s.is_active} up={s.is_up} /></td><td>{s.eff_interval_minutes} min {s.o_interval_minutes != null && <Badge tone="blue">custom</Badge>}</td><td>{fmtMs(s.eff_timeout_ms)}</td><td>{s.eff_retry_count}</td><td className="muted">{ago(s.last_checked)}</td><td>{s.is_active ? fmtDate(s.next_run_at, tz) : '—'}{s.maintenance_start && new Date(s.maintenance_end) > new Date() && <> <Badge tone="amber">maintenance</Badge></>}</td><td>{Number(s.eff_alert_on_down) ? <Badge tone="green">down</Badge> : <Badge>off</Badge>} {Number(s.eff_alert_on_recovery) ? <Badge tone="green">recovery</Badge> : null}</td></tr>)}</Table>}</Card>
+    {admin && <Card title="Dispatcher log" subtitle="Last 50 runs" flush>{logs.loading && !logs.data ? <Skeleton /> : !logs.data?.logs?.length ? <Empty title="No runs recorded yet" text="Set up the Hostinger Cron Job below." /> :
+      <Table head={['Started', 'Duration', 'Due', 'Checked', 'Up', 'Down', 'Maintenance', 'Released', 'Error']}>{logs.data.logs.map((l: any) => <tr key={l.id}><td>{fmtDate(l.started_at, tz)}</td><td>{l.duration_ms ?? '—'} ms</td><td>{l.due_count}</td><td>{l.checked}</td><td className="green">{l.up_count}</td><td className={l.down_count ? 'red' : ''}>{l.down_count}</td><td>{l.maintenance_skipped}</td><td>{l.released}</td><td className="muted small">{l.error || ''}</td></tr>)}</Table>}</Card>}
+    <Card title="Hostinger Cron Job setup"><p className="muted">hPanel → your Node.js app → Advanced → Cron Jobs. Schedule <code>* * * * *</code> (every minute, UTC). Command:</p><pre className="sw-code">{`curl -fsS -H "x-cron-secret: YOUR_CRON_SECRET" "${origin}/api/cron/check"`}</pre><p className="muted small">The secret is the CRON_SECRET environment variable and is never shown here. One cron job drives uptime checks, scheduled speed tests and scheduled email reports.</p></Card></div>;
+}
