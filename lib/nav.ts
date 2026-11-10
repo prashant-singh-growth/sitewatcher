@@ -9,7 +9,10 @@ export const NAV: NavSection[] = [
     { label: 'Websites', href: '/websites', icon: 'globe' } ] },
   { title: 'Monitoring', items: [
     { label: 'Cron Monitor', href: '/cron-monitor', icon: 'pulse' },
-    { label: 'Speed Test', href: '/speed-test', icon: 'zap' } ] },
+    { label: 'Speed Test', href: '/speed-test', icon: 'zap' },
+    { label: 'Sitemaps', href: '/sitemaps', icon: 'file' },
+    { label: 'Robots.txt', href: '/robots-txt', icon: 'shield' },
+    { label: 'Indexability', href: '/indexability', icon: 'search' } ] },
   { title: 'Analytics', items: [
     { label: 'Reports', href: '/reports', icon: 'file' },
     { label: 'Performance History', href: '/performance', icon: 'chart' },

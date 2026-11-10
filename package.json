@@ -10,6 +10,10 @@
     "db:migrate": "node --env-file=.env scripts/migrate.js up",
     "db:rollback": "node --env-file=.env scripts/migrate.js down",
     "db:status": "node --env-file=.env scripts/migrate.js status",
+    "test:sitemaps": "node --experimental-strip-types scripts/test-sitemaps.mjs",
+    "test:robots": "node --experimental-strip-types scripts/test-robots.mjs",
+    "test:indexability": "node --experimental-strip-types scripts/test-indexability.mjs",
+    "test": "node --experimental-strip-types scripts/test-sitemaps.mjs && node --experimental-strip-types scripts/test-robots.mjs && node --experimental-strip-types scripts/test-indexability.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

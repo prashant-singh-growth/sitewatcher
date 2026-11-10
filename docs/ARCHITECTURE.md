@@ -43,4 +43,4 @@ DNS check when a URL is saved, and a lookup hook used at connect time so the con
 Permissions go in `role_permissions` (and `ALL_PERMISSIONS` in `lib/rbac.ts`).
 
 ## Cron request order
-uptime checks (priority) -> due speed-test schedules (skipped after 50 s) -> due report emails (skipped after 70 s).
+uptime checks (priority) -> due speed-test schedules (skipped after 50 s) -> due sitemap checks (skipped after 40 s) -> due robots.txt checks (skipped after 35 s) -> due indexability checks (skipped after 40 s) -> due report emails (skipped after 70 s).
