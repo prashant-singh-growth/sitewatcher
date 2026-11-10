@@ -23,6 +23,7 @@ import {
   useAsync,
   useToast
 } from '../../ui/kit';
+import { WalkthroughTrigger } from '../../ui/walkthrough';
 
 export default function SitemapMonitor() {
   const searchParams = useSearchParams();
@@ -179,11 +180,15 @@ export default function SitemapMonitor() {
           <p className="eyebrow">MONITORING</p>
           <h1>XML Sitemap Monitor</h1>
           <p className="muted">
-            Continuous XML sitemap health checks, URL additions & removals, structural monitoring, and discovery tracking.
+            Continuous XML sitemap health checks, URL additions & removals, structural monitoring, and discovery tracking.{' '}
+            <Link href="/docs?article=sitemap-monitoring-guide" className="sw-link" style={{ fontSize: 13 }}>
+              Learn how sitemap monitoring works →
+            </Link>
           </p>
         </div>
 
         <div className="sw-actions">
+          <WalkthroughTrigger tourId="sitemaps-tour" />
           <Select
             value={siteId}
             onChange={e => setSiteId(e.target.value)}

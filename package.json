@@ -13,7 +13,8 @@
     "test:sitemaps": "node --experimental-strip-types scripts/test-sitemaps.mjs",
     "test:robots": "node --experimental-strip-types scripts/test-robots.mjs",
     "test:indexability": "node --experimental-strip-types scripts/test-indexability.mjs",
-    "test": "node --experimental-strip-types scripts/test-sitemaps.mjs && node --experimental-strip-types scripts/test-robots.mjs && node --experimental-strip-types scripts/test-indexability.mjs",
+    "test:docs": "node --experimental-strip-types scripts/test-docs.mjs",
+    "test": "node --experimental-strip-types scripts/test-sitemaps.mjs && node --experimental-strip-types scripts/test-robots.mjs && node --experimental-strip-types scripts/test-indexability.mjs && node --experimental-strip-types scripts/test-docs.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

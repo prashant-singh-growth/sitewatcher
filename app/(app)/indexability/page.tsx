@@ -23,6 +23,7 @@ import {
   useAsync,
   useToast
 } from '../../ui/kit';
+import { WalkthroughTrigger } from '../../ui/walkthrough';
 
 export default function IndexabilityMonitor() {
   const searchParams = useSearchParams();
@@ -146,10 +147,14 @@ export default function IndexabilityMonitor() {
           </p>
           <h1>Indexability & Noindex Directives</h1>
           <p className="muted">
-            Continuous verification of meta robots tags, X-Robots-Tag headers, canonical declarations, and HTTP redirects.
+            Continuous verification of meta robots tags, X-Robots-Tag headers, canonical declarations, and HTTP redirects.{' '}
+            <Link href="/docs?article=technical-indexability-vs-gsc" className="sw-link" style={{ fontSize: 13 }}>
+              Learn the difference between noindex and Google indexation →
+            </Link>
           </p>
         </div>
         <div className="sw-actions">
+          <WalkthroughTrigger tourId="indexability-tour" />
           {sites.length > 0 && (
             <Select
               value={siteId}

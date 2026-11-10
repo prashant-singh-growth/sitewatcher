@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useApp } from '../ui/context';
 import { Badge, Card, Empty, ErrorBox, Kpi, Skeleton, Table, call, fmtDate, fmtMs, useAsync, ago } from '../ui/kit';
+import { WalkthroughTrigger } from '../ui/walkthrough';
 
 const ROLE = { super_admin: 'Master Admin dashboard', manager: 'Project Manager dashboard', member: 'Member dashboard' } as Record<string, string>;
 export default function Overview() {
@@ -11,7 +12,7 @@ export default function Overview() {
   const projects: any[] = data?.projects ?? []; const p = data?.platform;
   const sum = projects.reduce((a, x) => ({ sites: a.sites + Number(x.site_count), up: a.up + Number(x.up_count), down: a.down + Number(x.down_count), inc: a.inc + Number(x.open_incidents) }), { sites: 0, up: 0, down: 0, inc: 0 });
   return <div className="sw-page">
-    <div className="sw-page-head"><div><p className="eyebrow">{ROLE[user.role]}</p><h1>Welcome back, {user.name.split(' ')[0]}</h1><p className="muted">Live health of {user.role === 'super_admin' ? 'every project on the platform' : 'the projects you can access'}.</p></div></div>
+    <div className="sw-page-head"><div><p className="eyebrow">{ROLE[user.role]}</p><h1>Welcome back, {user.name.split(' ')[0]}</h1><p className="muted">Live health of {user.role === 'super_admin' ? 'every project on the platform' : 'the projects you can access'}.</p></div><div className="sw-actions"><WalkthroughTrigger tourId="overview-tour" /></div></div>
     <ErrorBox error={error} retry={reload} />
     <div className="sw-kpis">
       {p && <><Kpi label="USERS" value={p.users} note={`${p.suspended} suspended`} /><Kpi label="PROJECTS" value={p.projects} note="Not archived" /></>}

@@ -22,6 +22,7 @@ import {
   useAsync,
   useToast
 } from '../../ui/kit';
+import { WalkthroughTrigger } from '../../ui/walkthrough';
 
 export default function RobotsTxtMonitor() {
   const searchParams = useSearchParams();
@@ -112,11 +113,15 @@ export default function RobotsTxtMonitor() {
           <p className="eyebrow">MONITORING</p>
           <h1>Robots.txt & Crawlability</h1>
           <p className="muted">
-            Continuous robots.txt rule monitoring, Googlebot crawlability validation, change detection, and blocked path tracking.
+            Continuous robots.txt rule monitoring, Googlebot crawlability validation, change detection, and blocked path tracking.{' '}
+            <Link href="/docs?article=robots-blocked-urls-troubleshooting" className="sw-link" style={{ fontSize: 13 }}>
+              Understand why a URL is blocked →
+            </Link>
           </p>
         </div>
 
         <div className="sw-actions">
+          <WalkthroughTrigger tourId="robots-tour" />
           <Select
             value={siteId}
             onChange={e => {

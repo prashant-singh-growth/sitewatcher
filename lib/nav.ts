@@ -20,6 +20,8 @@ export const NAV: NavSection[] = [
   { title: 'Administration', items: [
     { label: 'Team Management', href: '/team', icon: 'users' },
     { label: 'User Management', href: '/users', icon: 'shield', gate: 'manageUsers' },
-    { label: 'Settings', href: '/settings', icon: 'sliders' } ] }
+    { label: 'Settings', href: '/settings', icon: 'sliders' } ] },
+  { title: 'Support', items: [
+    { label: 'Help & Docs', href: '/docs', icon: 'file' } ] }
 ];
 export const ALL_ITEMS = NAV.flatMap(s => s.items);

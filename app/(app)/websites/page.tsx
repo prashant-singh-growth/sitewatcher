@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useApp } from '../../ui/context';
 import { Badge, Btn, Card, Empty, ErrorBox, Field, Input, Kpi, Modal, Select, Skeleton, StatusBadge, Table, call, fmtMs, ago, toLocalInput, useAsync, useToast, scoreTone } from '../../ui/kit';
+import { WalkthroughTrigger } from '../../ui/walkthrough';
 
 const PRESETS = [1, 2, 5, 10, 15, 30, 60];
 const blank = { name: '', url: '', interval: '', custom: '', timeout_ms: '', retry_count: '', retry_delay_ms: '', http_method: '', expected_status: '', alert_on_down: '', alert_on_recovery: '', m_start: '', m_end: '' };
@@ -26,7 +27,7 @@ export default function Websites() {
   };
   const act = async (s: any, what: 'toggle' | 'delete') => { if (what === 'delete' && !confirm(`Remove ${s.name}? History is kept for reports and the URL can be added again later.`)) return; try { await (what === 'delete' ? call(`/api/sites/${s.id}`, 'DELETE') : call(`/api/sites/${s.id}`, 'PATCH', { action: 'toggle' })); await Promise.all([reload(true as any), reloadProjects()]); } catch (e) { toast(e instanceof Error ? e.message : 'Failed', 'err'); } };
   const up = sites.filter(s => s.is_active && s.is_up === 1).length, down = sites.filter(s => s.is_active && s.is_up === 0).length;
-  return <div className="sw-page"><div className="sw-page-head"><div><p className="eyebrow">MAIN</p><h1>Websites</h1><p className="muted">{project ? `Websites in ${project.name}. Each can have its own schedule.` : 'Select a project to see its websites.'}</p></div>{canWrite && <Btn onClick={() => openForm(null)}>＋ Add website</Btn>}</div>
+  return <div className="sw-page"><div className="sw-page-head"><div><p className="eyebrow">MAIN</p><h1>Websites</h1><p className="muted">{project ? `Websites in ${project.name}. Each can have its own schedule.` : 'Select a project to see its websites.'} <Link href="/docs?article=website-monitoring-configuration" className="sw-link small">Settings guide →</Link></p></div><div className="sw-actions"><WalkthroughTrigger tourId="websites-tour" />{canWrite && <Btn onClick={() => openForm(null)}>＋ Add website</Btn>}</div></div>
     <ErrorBox error={error} retry={reload} />
     <div className="sw-kpis"><Kpi label="WEBSITES" value={sites.length} /><Kpi label="OPERATIONAL" value={up} tone="green" /><Kpi label="DOWN" value={down} tone="red" /><Kpi label="OPEN INCIDENTS" value={sites.reduce((a, s) => a + Number(s.open_incidents), 0)} tone="amber" /></div>
     <Card flush>{loading && !data ? <Skeleton rows={4} /> : !project ? <Empty title="No project selected" text="Create a project (Projects page) or ask for access." /> : !sites.length ? <Empty title="No websites in this project" text={canWrite ? 'Add your first URL to start monitoring.' : 'A project manager can add websites.'} action={canWrite ? <Btn onClick={() => openForm(null)}>Add website</Btn> : undefined} /> :
