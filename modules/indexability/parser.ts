@@ -66,32 +66,42 @@ export function parseDirectiveTokens(val: string | null | undefined): Set<string
 /**
  * Extracts meta tags from HTML head string using regex.
  */
+function extractHeadChunk(html: string): string {
+  // Search inside <head> (case-insensitive) or limit search to first 250KB of HTML
+  const headEndIdx = html.search(/<\/head>/i);
+  return headEndIdx > -1 ? html.slice(0, headEndIdx + 7) : html.slice(0, 250000);
+}
+
+function getHtmlAttr(attrs: string, attrName: string): string | null {
+  const regex = new RegExp(`(?:^|[\\s"'])${attrName}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'i');
+  const match = regex.exec(attrs);
+  if (!match) return null;
+  const val = match[1] ?? match[2] ?? match[3];
+  return val !== undefined ? val.trim() : null;
+}
+
 export function extractMetaRobotsFromHtml(html: string): { metaRobots: string | null; metaGooglebot: string | null } {
   let metaRobots: string | null = null;
   let metaGooglebot: string | null = null;
 
-  // Search inside <head> or limit search to first 250KB of HTML
-  const headEndIdx = html.indexOf('</head>');
-  const searchChunk = headEndIdx > -1 ? html.slice(0, headEndIdx + 7) : html.slice(0, 250000);
+  const searchChunk = extractHeadChunk(html);
 
-  // Match <meta name="..." content="..."> or <meta content="..." name="...">
+  // Match <meta name="..." content="..."> or unquoted/reordered attributes
   const metaRegex = /<meta\s+([^>]*?)>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = metaRegex.exec(searchChunk)) !== null) {
     const attrs = match[1];
+    const nameRaw = getHtmlAttr(attrs, 'name');
+    const contentRaw = getHtmlAttr(attrs, 'content');
 
-    const nameMatch = /\bname\s*=\s*["']([^"']+)["']/i.exec(attrs);
-    const contentMatch = /\bcontent\s*=\s*["']([^"']*)["']/i.exec(attrs);
-
-    if (nameMatch && contentMatch) {
-      const name = nameMatch[1].trim().toLowerCase();
-      const content = contentMatch[1].trim();
+    if (nameRaw && contentRaw !== null) {
+      const name = nameRaw.toLowerCase();
 
       if (name === 'robots') {
-        metaRobots = metaRobots ? `${metaRobots}, ${content}` : content;
+        metaRobots = metaRobots ? `${metaRobots}, ${contentRaw}` : contentRaw;
       } else if (name === 'googlebot') {
-        metaGooglebot = metaGooglebot ? `${metaGooglebot}, ${content}` : content;
+        metaGooglebot = metaGooglebot ? `${metaGooglebot}, ${contentRaw}` : contentRaw;
       }
     }
   }
@@ -116,21 +126,20 @@ export function extractCanonicals(html: string, httpLinkHeader?: string | null):
     }
   }
 
-  // 2. From HTML <link rel="canonical" href="...">
-  const headEndIdx = html.indexOf('</head>');
-  const searchChunk = headEndIdx > -1 ? html.slice(0, headEndIdx + 7) : html.slice(0, 250000);
+  // 2. From HTML <link rel="canonical" href="..."> (supports unquoted/minified attrs)
+  const searchChunk = extractHeadChunk(html);
 
   const linkRegex = /<link\s+([^>]*?)>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = linkRegex.exec(searchChunk)) !== null) {
     const attrs = match[1];
-    const relMatch = /\brel\s*=\s*["']canonical["']/i.test(attrs);
-    if (!relMatch) continue;
+    const rel = getHtmlAttr(attrs, 'rel');
+    if (!rel || !rel.toLowerCase().split(/\s+/).includes('canonical')) continue;
 
-    const hrefMatch = /\bhref\s*=\s*["']([^"']*)["']/i.exec(attrs);
-    if (hrefMatch && hrefMatch[1]) {
-      canonicals.push(hrefMatch[1].trim());
+    const href = getHtmlAttr(attrs, 'href');
+    if (href) {
+      canonicals.push(href);
     }
   }
 

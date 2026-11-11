@@ -117,6 +117,10 @@ export async function checkSingleUrlIndexability(
     previousState.httpStatus !== crawlResult.statusCode ||
     previousState.canonicalStatus !== parsed.canonicalStatus
   );
+  const isIndexabilityChanged =
+    previousState != null &&
+    previousState.httpStatus !== null &&
+    Boolean(previousState.isIndexable) !== parsed.isTechnicallyIndexable;
 
   // Record historical snapshot
   await db.query(
@@ -147,8 +151,8 @@ export async function checkSingleUrlIndexability(
   await db.query(
     `UPDATE url_indexability_pages
      SET http_status = ?,
+         previous_is_indexable = IF(? = 1, ?, COALESCE(previous_is_indexable, ?)),
          is_indexable = ?,
-         previous_is_indexable = IF(previous_is_indexable IS NULL, ?, previous_is_indexable),
          has_noindex = ?,
          noindex_source = ?,
          meta_robots = ?,
@@ -163,6 +167,8 @@ export async function checkSingleUrlIndexability(
      WHERE id = ?`,
     [
       crawlResult.statusCode,
+      isIndexabilityChanged ? 1 : 0,
+      previousState ? (previousState.isIndexable ? 1 : 0) : (parsed.isTechnicallyIndexable ? 1 : 0),
       parsed.isTechnicallyIndexable ? 1 : 0,
       parsed.isTechnicallyIndexable ? 1 : 0,
       parsed.hasNoindex ? 1 : 0,

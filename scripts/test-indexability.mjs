@@ -316,6 +316,33 @@ test('12. End-to-end technical indexability validation', () => {
   assert.strictEqual(noCanonical.canonicalStatus, 'missing');
 });
 
+// 13. Minified HTML (unquoted attributes, uppercase </HEAD>, compact attrs)
+test('13. Minified HTML canonical and meta robots extraction', () => {
+  const htmlMinified =
+    '<!doctype html><html><HEAD><meta name=robots content=noindex><link rel=canonical href=https://example.com/minified></HEAD><body></body></html>';
+
+  const meta = extractMetaRobotsFromHtml(htmlMinified);
+  assert.strictEqual(meta.metaRobots, 'noindex');
+
+  const canonicals = extractCanonicals(htmlMinified);
+  assert.deepStrictEqual(canonicals, ['https://example.com/minified']);
+
+  const res = evaluateTechnicalIndexability({
+    url: 'https://example.com/minified',
+    httpStatus: 200,
+    html: htmlMinified
+  });
+  assert.strictEqual(res.hasNoindex, true);
+  assert.strictEqual(res.canonicalStatus, 'self_referencing');
+  assert.strictEqual(res.isTechnicallyIndexable, false);
+
+  const adjacentAttrsHtml =
+    '<html><head><meta name="robots"content="index,follow"><link rel="alternate canonical" href="https://example.com/compact"></head><body></body></html>';
+  const compactMeta = extractMetaRobotsFromHtml(adjacentAttrsHtml);
+  assert.strictEqual(compactMeta.metaRobots, 'index,follow');
+  assert.deepStrictEqual(extractCanonicals(adjacentAttrsHtml), ['https://example.com/compact']);
+});
+
 console.log(`\nResults: ${passedTests}/${totalTests} tests passed.`);
 if (passedTests !== totalTests) {
   process.exit(1);

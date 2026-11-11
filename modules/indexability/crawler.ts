@@ -38,42 +38,52 @@ function fetchSingleHop(
         signal,
         lookup: safeLookup as any,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html; SiteWatch-Indexability/2.0)',
+          'User-Agent': 'SiteWatch-Indexability/2.0 (+https://sitewatch.io)',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Encoding': 'gzip, deflate'
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br'
         }
       },
       res => {
         const chunks: Buffer[] = [];
         let totalBytes = 0;
+        let settled = false;
+
+        const finishResolve = () => {
+          if (settled) return;
+          settled = true;
+          resolve({
+            statusCode: res.statusCode || 0,
+            statusMessage: res.statusMessage || '',
+            headers: res.headers,
+            buffer: Buffer.concat(chunks)
+          });
+        };
+
+        const finishReject = (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          reject(err);
+        };
 
         res.on('data', chunk => {
           totalBytes += chunk.length;
           if (totalBytes > MAX_HTML_BYTES) {
             // Cut off after 2MB - head is always in the first few KB
+            const remaining = MAX_HTML_BYTES - (totalBytes - chunk.length);
+            if (remaining > 0) {
+              chunks.push(chunk.subarray(0, remaining));
+            }
+            finishResolve();
             res.destroy();
             return;
           }
           chunks.push(chunk);
         });
 
-        res.on('close', () => {
-          resolve({
-            statusCode: res.statusCode || 0,
-            statusMessage: res.statusMessage || '',
-            headers: res.headers,
-            buffer: Buffer.concat(chunks)
-          });
-        });
-
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode || 0,
-            statusMessage: res.statusMessage || '',
-            headers: res.headers,
-            buffer: Buffer.concat(chunks)
-          });
-        });
+        res.on('end', finishResolve);
+        res.on('close', finishResolve);
+        res.on('error', finishReject);
       }
     );
 
@@ -110,6 +120,10 @@ export async function crawlUrlForIndexability(
 
       const res = await fetchSingleHop(url, controller.signal, timeoutMs);
       const code = res.statusCode;
+
+      // Reset per-hop headers so redirect hop headers do not leak into the final response
+      xRobotsHeader = null;
+      httpLinkHeader = null;
 
       // Extract headers from response
       const xRobots = res.headers['x-robots-tag'];
@@ -163,7 +177,7 @@ export async function crawlUrlForIndexability(
         continue;
       }
 
-      // Decompress if gzip/deflate
+      // Decompress if gzip/deflate/brotli
       let rawBuf = res.buffer;
       const encoding = (res.headers['content-encoding'] || '').toLowerCase();
       if (encoding.includes('gzip') || (rawBuf.length >= 2 && rawBuf[0] === 0x1f && rawBuf[1] === 0x8b)) {
@@ -175,6 +189,12 @@ export async function crawlUrlForIndexability(
       } else if (encoding.includes('deflate')) {
         try {
           rawBuf = zlib.inflateSync(rawBuf);
+        } catch {
+          /* fallback */
+        }
+      } else if (encoding.includes('br')) {
+        try {
+          rawBuf = zlib.brotliDecompressSync(rawBuf);
         } catch {
           /* fallback */
         }
