@@ -1,6 +1,7 @@
 import { api, idParam } from '@/lib/api';
 import { requireSite } from '@/lib/rbac';
-import { getUrlHistory } from '@/modules/indexability/service';
+import { audit } from '@/lib/audit';
+import { getUrlHistory, deleteIndexabilityUrl } from '@/modules/indexability/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,4 +16,28 @@ export const GET = api(async ({ req, user, params }) => {
 
   const history = await getUrlHistory(pageId, siteId, Number(site.project_id));
   return history;
+});
+
+/**
+ * DELETE /api/indexability/urls/[id]?siteId=
+ * Removes a monitored URL from indexability tracking.
+ */
+export const DELETE = api(async ({ req, user, params, ip }) => {
+  const pageId = idParam((await params)?.id, 'pageId');
+  const siteId = idParam(req.nextUrl.searchParams.get('siteId') ?? undefined, 'siteId');
+  const { site } = await requireSite(user, siteId, 'site.configure', { write: true });
+
+  const { url } = await deleteIndexabilityUrl(pageId, siteId, Number(site.project_id));
+
+  await audit({
+    user,
+    action: 'indexability.url_removed',
+    entityType: 'site',
+    entityId: siteId,
+    projectId: Number(site.project_id),
+    metadata: { siteId, pageId, url },
+    ip
+  });
+
+  return { ok: true, url };
 });

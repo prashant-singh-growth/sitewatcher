@@ -3,7 +3,7 @@ import { db, rows } from '@/lib/db';
 import { ApiError } from '@/lib/errors';
 import { assertPublicUrlSyntax } from '@/lib/ssrf';
 import { crawlUrl, type CrawlResult } from './crawler';
-import { parseIndexabilitySignals, type ParsedIndexabilitySignals } from './parser';
+import { parseIndexabilitySignals, parseManualUrlInputs, type ParsedIndexabilitySignals } from './parser';
 import { evaluatePageIndexabilityIssues } from './issues';
 
 function sha256(val: string): string {
@@ -26,63 +26,148 @@ export async function ensureIndexabilityMonitor(siteId: number, projectId: numbe
   return existing[0];
 }
 
+export type SiteIndexabilitySummary = {
+  siteId: number;
+  totalMonitored: number;
+  checkedCount: number;
+  indexableCount: number;
+  noindexCount: number;
+  canonicalIssuesCount: number;
+  errorsCount: number;
+  recentlyChangedCount: number;
+};
+
 /**
- * Discovers and seeds candidate URLs for indexability checks:
- * 1. Root page of the website (source = 'root')
- * 2. Discovered URLs from XML sitemaps (source = 'sitemap')
+ * Recalculates aggregated indexability KPIs for a website without auto-seeding URLs.
  */
-export async function syncCandidateUrlsForSite(
+export async function refreshIndexabilityMonitorStats(
   siteId: number,
-  projectId: number,
-  siteUrl: string,
-  limit: number = 200
-): Promise<number> {
-  let seededCount = 0;
-
-  // 1. Root URL
-  try {
-    const origin = new URL(siteUrl).origin;
-    const rootUrl = `${origin}/`;
-    const rootHash = sha256(rootUrl);
-
-    const [res] = await db.query<any>(
-      `INSERT IGNORE INTO url_indexability_pages (
-         project_id, site_id, url, url_hash, source, first_checked_at, last_checked_at
-       ) VALUES (?, ?, ?, ?, 'root', UTC_TIMESTAMP(3), '1970-01-01 00:00:00')`,
-      [projectId, siteId, rootUrl, rootHash]
-    );
-    if (res.affectedRows > 0) seededCount++;
-  } catch {
-    // Ignore invalid root URL syntax
-  }
-
-  // 2. Discovered URLs from sitemaps
-  const sitemapUrls = await rows<{ url: string }>(
-    `SELECT DISTINCT loc AS url FROM sitemap_urls WHERE site_id = ? AND status = 'active' LIMIT ?`,
-    [siteId, limit]
+  advanceSchedule = false
+): Promise<Omit<SiteIndexabilitySummary, 'checkedCount'>> {
+  const statsRows = await rows<any>(
+    `SELECT
+       COUNT(*) AS total_monitored_urls,
+       SUM(CASE WHEN is_indexable = 1 AND http_status IS NOT NULL THEN 1 ELSE 0 END) AS indexable_urls_count,
+       SUM(CASE WHEN has_noindex = 1 THEN 1 ELSE 0 END) AS noindex_urls_count,
+       SUM(CASE WHEN canonical_status IN ('multiple', 'invalid', 'canonicalized', 'cross_domain') THEN 1 ELSE 0 END) AS canonical_issues_count,
+       SUM(CASE WHEN (http_status >= 400 OR http_status IS NULL) AND last_checked_at > '1970-01-01' THEN 1 ELSE 0 END) AS error_urls_count,
+       SUM(CASE WHEN status_changed_at >= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS recently_changed_count
+     FROM url_indexability_pages
+     WHERE site_id = ?`,
+    [siteId]
   );
 
-  if (sitemapUrls.length > 0) {
-    const CHUNK = 50;
-    for (let i = 0; i < sitemapUrls.length; i += CHUNK) {
-      const slice = sitemapUrls.slice(i, i + CHUNK);
-      const valSql = slice.map(() => '(?, ?, ?, ?, ?, UTC_TIMESTAMP(3), ?)').join(',');
-      const params: any[] = [];
-      for (const item of slice) {
-        params.push(projectId, siteId, item.url, sha256(item.url), 'sitemap', '1970-01-01 00:00:00');
-      }
+  const stats = statsRows[0] || {};
+  const totalMonitored = Number(stats.total_monitored_urls || 0);
+  const indexableCount = Number(stats.indexable_urls_count || 0);
+  const noindexCount = Number(stats.noindex_urls_count || 0);
+  const canonicalIssuesCount = Number(stats.canonical_issues_count || 0);
+  const errorsCount = Number(stats.error_urls_count || 0);
+  const recentlyChangedCount = Number(stats.recently_changed_count || 0);
 
-      const [insertRes] = await db.query<any>(
-        `INSERT IGNORE INTO url_indexability_pages (
-           project_id, site_id, url, url_hash, source, first_checked_at, last_checked_at
-         ) VALUES ${valSql}`,
-        params
-      );
-      seededCount += insertRes.affectedRows || 0;
-    }
+  if (advanceSchedule) {
+    await db.query(
+      `UPDATE indexability_monitors
+       SET total_monitored_urls = ?,
+           indexable_urls_count = ?,
+           noindex_urls_count = ?,
+           canonical_issues_count = ?,
+           error_urls_count = ?,
+           recently_changed_count = ?,
+           last_checked_at = UTC_TIMESTAMP(3),
+           claim_token = NULL,
+           claimed_at = NULL,
+           next_run_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL check_interval_hours HOUR),
+           updated_at = updated_at
+       WHERE site_id = ?`,
+      [totalMonitored, indexableCount, noindexCount, canonicalIssuesCount, errorsCount, recentlyChangedCount, siteId]
+    );
+  } else {
+    await db.query(
+      `UPDATE indexability_monitors
+       SET total_monitored_urls = ?,
+           indexable_urls_count = ?,
+           noindex_urls_count = ?,
+           canonical_issues_count = ?,
+           error_urls_count = ?,
+           recently_changed_count = ?,
+           updated_at = updated_at
+       WHERE site_id = ?`,
+      [totalMonitored, indexableCount, noindexCount, canonicalIssuesCount, errorsCount, recentlyChangedCount, siteId]
+    );
   }
 
-  return seededCount;
+  return {
+    siteId,
+    totalMonitored,
+    indexableCount,
+    noindexCount,
+    canonicalIssuesCount,
+    errorsCount,
+    recentlyChangedCount
+  };
+}
+
+/**
+ * Crawls a batch of page rows using a bounded worker pool and request time budget.
+ */
+async function crawlPagesWithConcurrency(
+  pages: Array<{
+    id: number;
+    url: string;
+    http_status: number | null;
+    is_indexable: number | boolean;
+    has_noindex: number | boolean;
+    canonical_url: string | null;
+    canonical_status: string;
+    last_checked_at: Date | string | null;
+  }>,
+  siteId: number,
+  projectId: number,
+  options?: { concurrency?: number; budgetMs?: number }
+): Promise<number> {
+  if (!pages.length) return 0;
+
+  const concurrency = Math.max(1, Math.min(options?.concurrency ?? 5, pages.length));
+  const budgetMs = options?.budgetMs ?? 45_000;
+  const startedAt = Date.now();
+  const queue = [...pages];
+  let checkedCount = 0;
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      if (Date.now() - startedAt > budgetMs) break;
+      const page = queue.shift();
+      if (!page) break;
+
+      const hasCheckedBefore =
+        page.http_status !== null ||
+        Boolean(page.last_checked_at && new Date(page.last_checked_at).getFullYear() > 1970);
+      const prev = hasCheckedBefore
+        ? {
+            httpStatus: page.http_status,
+            isIndexable: Boolean(page.is_indexable),
+            hasNoindex: Boolean(page.has_noindex),
+            canonicalUrl: page.canonical_url,
+            canonicalStatus: page.canonical_status
+          }
+        : null;
+
+      try {
+        await checkSingleUrlIndexability(page.id, siteId, projectId, page.url, prev);
+        checkedCount++;
+      } catch {
+        // Continue next page on unexpected error
+      }
+
+      if (queue.length > 0 && Date.now() - startedAt < budgetMs) {
+        await new Promise(r => setTimeout(r, 40));
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return checkedCount;
 }
 
 /**
@@ -199,25 +284,15 @@ export async function checkSingleUrlIndexability(
   return { crawlResult, parsed };
 }
 
-export type SiteIndexabilitySummary = {
-  siteId: number;
-  totalMonitored: number;
-  checkedCount: number;
-  indexableCount: number;
-  noindexCount: number;
-  canonicalIssuesCount: number;
-  errorsCount: number;
-  recentlyChangedCount: number;
-};
-
 /**
- * Runs an indexability evaluation across candidate URLs for a website.
+ * Runs an indexability evaluation across tracked URLs for a website.
+ * URLs are managed manually; no URLs are auto-imported from sitemaps or root pages.
  */
 export async function checkSiteIndexability(
   siteId: number,
-  options?: { maxPages?: number; triggeredBy?: 'cron' | 'manual' }
+  options?: { maxPages?: number; triggeredBy?: 'cron' | 'manual'; budgetMs?: number }
 ): Promise<SiteIndexabilitySummary> {
-  const maxPages = options?.maxPages ?? 50;
+  const maxPages = options?.maxPages ?? 100;
 
   const siteList = await rows<any>(
     'SELECT s.id, s.project_id, s.name, s.url, p.status AS project_status FROM monitored_sites s JOIN projects p ON p.id = s.project_id WHERE s.id = ?',
@@ -227,146 +302,173 @@ export async function checkSiteIndexability(
   if (!site) throw new ApiError(404, 'Website not found.');
 
   await ensureIndexabilityMonitor(site.id, Number(site.project_id));
-  await syncCandidateUrlsForSite(site.id, Number(site.project_id), site.url, 200);
 
-  // Select pages to check ordered by oldest checked first
-  const pagesToCheck = await rows<any>(
-    `SELECT id, url, http_status, is_indexable, has_noindex, canonical_url, canonical_status, last_checked_at
-     FROM url_indexability_pages
-     WHERE site_id = ?
-     ORDER BY last_checked_at ASC
-     LIMIT ?`,
-    [siteId, maxPages]
-  );
+  const pagesToCheck =
+    maxPages > 0
+      ? await rows<any>(
+          `SELECT id, url, http_status, is_indexable, has_noindex, canonical_url, canonical_status, last_checked_at
+           FROM url_indexability_pages
+           WHERE site_id = ?
+           ORDER BY last_checked_at ASC
+           LIMIT ?`,
+          [siteId, maxPages]
+        )
+      : [];
 
-  let checkedCount = 0;
-  for (const page of pagesToCheck) {
-    const prev = page.last_checked_at && new Date(page.last_checked_at).getFullYear() > 1970
-      ? {
-          httpStatus: page.http_status,
-          isIndexable: Boolean(page.is_indexable),
-          hasNoindex: Boolean(page.has_noindex),
-          canonicalUrl: page.canonical_url,
-          canonicalStatus: page.canonical_status
-        }
-      : null;
+  const checkedCount = await crawlPagesWithConcurrency(pagesToCheck, siteId, Number(site.project_id), {
+    concurrency: 5,
+    budgetMs: options?.budgetMs ?? 45_000
+  });
 
-    try {
-      await checkSingleUrlIndexability(page.id, siteId, Number(site.project_id), page.url, prev);
-      checkedCount++;
-    } catch {
-      // Continue next page on unexpected error
-    }
+  const stats = await refreshIndexabilityMonitorStats(siteId, true);
+  return { ...stats, checkedCount };
+}
 
-    // Polite crawl throttle
-    if (pagesToCheck.length > 1) {
-      await new Promise(r => setTimeout(r, 60));
-    }
+export type BulkAddManualUrlsResult = {
+  totalSubmitted: number;
+  addedCount: number;
+  existingCount: number;
+  crawledCount: number;
+  pendingCount: number;
+  summary: Omit<SiteIndexabilitySummary, 'checkedCount'>;
+  pages: any[];
+};
+
+/**
+ * Manually adds one or many custom URLs (e.g. 1, 5, 40+) for indexability monitoring
+ * and crawls them concurrently within a bounded request time budget.
+ */
+export async function addManualUrlsToIndexability(
+  siteId: number,
+  projectId: number,
+  rawInput: string | string[],
+  options?: { crawlNow?: boolean; budgetMs?: number }
+): Promise<BulkAddManualUrlsResult> {
+  const siteList = await rows<any>('SELECT url FROM monitored_sites WHERE id = ?', [siteId]);
+  const site = siteList[0];
+  if (!site) throw new ApiError(404, 'Website not found.');
+
+  const { urls, errors } = parseManualUrlInputs(rawInput, site.url);
+  if (errors.length > 0) {
+    throw new ApiError(400, errors.slice(0, 3).join(' '));
+  }
+  if (urls.length === 0) {
+    throw new ApiError(400, 'Please provide at least one valid URL.');
   }
 
-  // Recalculate site-level aggregated metrics
-  const statsRows = await rows<any>(
-    `SELECT
-       COUNT(*) AS total_monitored_urls,
-       SUM(CASE WHEN is_indexable = 1 THEN 1 ELSE 0 END) AS indexable_urls_count,
-       SUM(CASE WHEN has_noindex = 1 THEN 1 ELSE 0 END) AS noindex_urls_count,
-       SUM(CASE WHEN canonical_status IN ('multiple', 'invalid', 'canonicalized', 'cross_domain') THEN 1 ELSE 0 END) AS canonical_issues_count,
-       SUM(CASE WHEN (http_status >= 400 OR http_status IS NULL) AND last_checked_at > '1970-01-01' THEN 1 ELSE 0 END) AS error_urls_count,
-       SUM(CASE WHEN status_changed_at >= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS recently_changed_count
+  for (const u of urls) {
+    assertPublicUrlSyntax(u);
+  }
+
+  await ensureIndexabilityMonitor(siteId, projectId);
+
+  const hashes = urls.map(sha256);
+  const placeholders = hashes.map(() => '?').join(',');
+  const existingRows = await rows<{ url_hash: string }>(
+    `SELECT url_hash FROM url_indexability_pages WHERE site_id = ? AND url_hash IN (${placeholders})`,
+    [siteId, ...hashes]
+  );
+  const existingSet = new Set(existingRows.map(r => r.url_hash));
+  const addedCount = hashes.filter(h => !existingSet.has(h)).length;
+  const existingCount = urls.length - addedCount;
+
+  const CHUNK = 50;
+  for (let i = 0; i < urls.length; i += CHUNK) {
+    const slice = urls.slice(i, i + CHUNK);
+    const valSql = slice.map(() => "(?, ?, ?, ?, 'manual', UTC_TIMESTAMP(3), '1970-01-01 00:00:00')").join(',');
+    const params: any[] = [];
+    for (const u of slice) {
+      params.push(projectId, siteId, u, sha256(u));
+    }
+    await db.query(
+      `INSERT INTO url_indexability_pages (
+         project_id, site_id, url, url_hash, source, first_checked_at, last_checked_at
+       ) VALUES ${valSql}
+       ON DUPLICATE KEY UPDATE source = 'manual'`,
+      params
+    );
+  }
+
+  const targetPages = await rows<any>(
+    `SELECT id, url, http_status, is_indexable, has_noindex, canonical_url, canonical_status, last_checked_at
      FROM url_indexability_pages
-     WHERE site_id = ?`,
-    [siteId]
+     WHERE site_id = ? AND url_hash IN (${placeholders})`,
+    [siteId, ...hashes]
   );
 
-  const stats = statsRows[0] || {};
-  const totalMonitored = Number(stats.total_monitored_urls || 0);
-  const indexableCount = Number(stats.indexable_urls_count || 0);
-  const noindexCount = Number(stats.noindex_urls_count || 0);
-  const canonicalIssuesCount = Number(stats.canonical_issues_count || 0);
-  const errorsCount = Number(stats.error_urls_count || 0);
-  const recentlyChangedCount = Number(stats.recently_changed_count || 0);
+  let crawledCount = 0;
+  if (options?.crawlNow !== false && targetPages.length > 0) {
+    crawledCount = await crawlPagesWithConcurrency(targetPages, siteId, projectId, {
+      concurrency: 5,
+      budgetMs: options?.budgetMs ?? 35_000
+    });
+  }
 
-  await db.query(
-    `UPDATE indexability_monitors
-     SET total_monitored_urls = ?,
-         indexable_urls_count = ?,
-         noindex_urls_count = ?,
-         canonical_issues_count = ?,
-         error_urls_count = ?,
-         recently_changed_count = ?,
-         last_checked_at = UTC_TIMESTAMP(3),
-         claim_token = NULL,
-         claimed_at = NULL,
-         next_run_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL check_interval_hours HOUR),
-         updated_at = updated_at
-     WHERE site_id = ?`,
-    [
-      totalMonitored,
-      indexableCount,
-      noindexCount,
-      canonicalIssuesCount,
-      errorsCount,
-      recentlyChangedCount,
-      siteId
-    ]
+  const refreshedPages = await rows<any>(
+    `SELECT * FROM url_indexability_pages WHERE site_id = ? AND url_hash IN (${placeholders})`,
+    [siteId, ...hashes]
   );
+
+  const summary = await refreshIndexabilityMonitorStats(siteId, false);
 
   return {
-    siteId,
-    totalMonitored,
-    checkedCount,
-    indexableCount,
-    noindexCount,
-    canonicalIssuesCount,
-    errorsCount,
-    recentlyChangedCount
+    totalSubmitted: urls.length,
+    addedCount,
+    existingCount,
+    crawledCount,
+    pendingCount: Math.max(0, targetPages.length - crawledCount),
+    summary,
+    pages: refreshedPages
   };
 }
 
 /**
- * Manually adds a custom URL for indexability monitoring and checks it immediately.
+ * Manually adds a single custom URL for indexability monitoring and checks it immediately.
  */
 export async function addManualUrlToIndexability(
   siteId: number,
   projectId: number,
   rawUrl: string
 ) {
-  assertPublicUrlSyntax(rawUrl);
+  const res = await addManualUrlsToIndexability(siteId, projectId, [rawUrl], { crawlNow: true });
+  return res.pages[0];
+}
 
-  const siteList = await rows<any>('SELECT url FROM monitored_sites WHERE id = ?', [siteId]);
-  const site = siteList[0];
-  if (!site) throw new ApiError(404, 'Website not found.');
-
-  // Ensure same origin or valid protocol
-  const targetUrl = new URL(rawUrl);
-  const siteOrigin = new URL(site.url).origin;
-  if (targetUrl.origin.toLowerCase() !== siteOrigin.toLowerCase()) {
-    throw new ApiError(400, `URL must belong to website origin (${siteOrigin}).`);
-  }
-
-  const urlHash = sha256(rawUrl);
-
-  await db.query(
-    `INSERT INTO url_indexability_pages (
-       project_id, site_id, url, url_hash, source, first_checked_at, last_checked_at
-     ) VALUES (?, ?, ?, ?, 'manual', UTC_TIMESTAMP(3), '1970-01-01 00:00:00')
-     ON DUPLICATE KEY UPDATE source = VALUES(source)`,
-    [projectId, siteId, rawUrl, urlHash]
+/**
+ * Deletes a single monitored URL and refreshes monitor KPIs.
+ */
+export async function deleteIndexabilityUrl(
+  pageId: number,
+  siteId: number,
+  projectId: number
+): Promise<{ url: string }> {
+  const existing = await rows<{ id: number; url: string }>(
+    'SELECT id, url FROM url_indexability_pages WHERE id = ? AND site_id = ? AND project_id = ?',
+    [pageId, siteId, projectId]
   );
-
-  const page = (await rows<any>(
-    'SELECT * FROM url_indexability_pages WHERE site_id = ? AND url_hash = ?',
-    [siteId, urlHash]
-  ))[0];
-
-  if (page) {
-    await checkSingleUrlIndexability(page.id, siteId, projectId, rawUrl, null);
+  if (!existing.length) {
+    throw new ApiError(404, 'Monitored URL not found.');
   }
 
-  // Refresh monitor counts
-  await checkSiteIndexability(siteId, { maxPages: 0 });
+  await db.query('DELETE FROM url_indexability_pages WHERE id = ? AND site_id = ? AND project_id = ?', [
+    pageId,
+    siteId,
+    projectId
+  ]);
+  await refreshIndexabilityMonitorStats(siteId, false);
+  return { url: existing[0].url };
+}
 
-  return (await rows<any>('SELECT * FROM url_indexability_pages WHERE id = ?', [page.id]))[0];
+/**
+ * Deletes legacy auto-discovered URLs (source != 'manual') while preserving manually added URLs.
+ */
+export async function clearNonManualIndexabilityUrls(siteId: number, projectId: number): Promise<number> {
+  const [res] = await db.query<any>(
+    "DELETE FROM url_indexability_pages WHERE site_id = ? AND project_id = ? AND source <> 'manual'",
+    [siteId, projectId]
+  );
+  await refreshIndexabilityMonitorStats(siteId, false);
+  return Number(res.affectedRows || 0);
 }
 
 /**
@@ -448,7 +550,7 @@ export async function getEvaluatedUrls(
   const params: any[] = [siteId, projectId];
 
   if (opts?.status === 'indexable') {
-    where += ' AND u.is_indexable = 1';
+    where += ' AND u.is_indexable = 1 AND u.http_status IS NOT NULL';
   } else if (opts?.status === 'noindex') {
     where += ' AND u.has_noindex = 1';
   } else if (opts?.status === 'canonical_issue') {
@@ -470,6 +572,12 @@ export async function getEvaluatedUrls(
   );
   const total = countRow[0]?.total || 0;
 
+  const nonManualRow = await rows<{ cnt: number }>(
+    "SELECT COUNT(*) AS cnt FROM url_indexability_pages WHERE site_id = ? AND project_id = ? AND source <> 'manual'",
+    [siteId, projectId]
+  );
+  const nonManualCount = Number(nonManualRow[0]?.cnt || 0);
+
   const items = await rows<any>(
     `SELECT u.*
      FROM url_indexability_pages u
@@ -481,6 +589,7 @@ export async function getEvaluatedUrls(
 
   return {
     items,
+    nonManualCount,
     pagination: {
       page,
       limit,
@@ -560,7 +669,7 @@ export async function runDueIndexabilityChecks(
 
     const siteId = claimedSites[0].site_id;
     try {
-      await checkSiteIndexability(siteId, { maxPages: 25, triggeredBy: 'cron' });
+      await checkSiteIndexability(siteId, { maxPages: 50, triggeredBy: 'cron', budgetMs: 30_000 });
       processed++;
     } catch {
       // Clear claim on error

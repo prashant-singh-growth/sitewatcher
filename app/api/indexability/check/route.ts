@@ -16,7 +16,7 @@ export const POST = api(async ({ req, user, ip }) => {
   const siteId = idParam(String(b.siteId ?? ''), 'siteId');
   const { site } = await requireSite(user, siteId, 'site.configure', { write: true });
 
-  const maxPages = b.maxPages ? Math.min(100, Math.max(1, Number(b.maxPages))) : 50;
+  const maxPages = b.maxPages ? Math.min(200, Math.max(1, Number(b.maxPages))) : 100;
   const summary = await checkSiteIndexability(siteId, { maxPages, triggeredBy: 'manual' });
 
   await audit({

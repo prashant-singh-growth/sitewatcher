@@ -287,3 +287,75 @@ export function evaluateTechnicalIndexability(params: {
 
 export const parseIndexabilitySignals = evaluateTechnicalIndexability;
 
+export const MAX_MANUAL_INDEXABILITY_URLS = 200;
+
+/**
+ * Parses and validates single or bulk manual URL input (newline- or comma-separated, full URLs or /paths)
+ * against the monitored website's origin.
+ */
+export function parseManualUrlInputs(
+  rawInput: string | string[],
+  siteOriginUrl: string
+): { urls: string[]; errors: string[] } {
+  let siteOrigin: string;
+  try {
+    siteOrigin = new URL(siteOriginUrl).origin;
+  } catch {
+    return { urls: [], errors: ['Invalid website origin URL.'] };
+  }
+
+  const rawItems = Array.isArray(rawInput)
+    ? rawInput.flatMap(item => String(item ?? '').split(/\r?\n/))
+    : String(rawInput ?? '').split(/\r?\n/);
+
+  const tokens: string[] = [];
+  for (const line of rawItems) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/,\s*(?=https?:\/\/|\/)/i);
+    for (const part of parts) {
+      const token = part.trim();
+      if (token) tokens.push(token);
+    }
+  }
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  const errors: string[] = [];
+
+  for (const raw of tokens) {
+    let candidate = raw;
+    if (raw.startsWith('/') && !raw.startsWith('//')) {
+      candidate = `${siteOrigin}${raw}`;
+    } else if (!/^https?:\/\//i.test(raw)) {
+      errors.push(`"${raw}": URL must start with http(s):// or /path.`);
+      continue;
+    }
+
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.username || parsed.password) {
+        errors.push(`"${raw}": Credentials in URL are not allowed.`);
+        continue;
+      }
+      if (parsed.origin.toLowerCase() !== siteOrigin.toLowerCase()) {
+        errors.push(`"${raw}": URL must belong to website origin (${siteOrigin}).`);
+        continue;
+      }
+      const normalized = parsed.toString();
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        urls.push(normalized);
+      }
+    } catch {
+      errors.push(`"${raw}": Invalid URL format.`);
+    }
+  }
+
+  if (urls.length > MAX_MANUAL_INDEXABILITY_URLS) {
+    errors.push(`Too many unique URLs (${urls.length}). Maximum ${MAX_MANUAL_INDEXABILITY_URLS} URLs per batch.`);
+  }
+
+  return { urls, errors };
+}
+

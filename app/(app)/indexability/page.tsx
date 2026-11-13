@@ -66,10 +66,13 @@ export default function IndexabilityMonitor() {
   const [urlSearch, setUrlSearch] = useState<string>('');
   const [urlPage, setUrlPage] = useState<number>(1);
 
-  // Add URL modal state
+  // Add URL(s) modal state
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addUrlInput, setAddUrlInput] = useState('');
+  const [addUrlsText, setAddUrlsText] = useState('');
+  const [crawlNow, setCrawlNow] = useState(true);
   const [addingUrl, setAddingUrl] = useState(false);
+  const [removingId, setRemovingId] = useState<number | null>(null);
+  const [clearingAuto, setClearingAuto] = useState(false);
 
   // History modal state
   const [selectedPageId, setSelectedPageId] = useState<number | null>(null);
@@ -89,20 +92,30 @@ export default function IndexabilityMonitor() {
               urlStatus ? `&status=${urlStatus}` : ''
             }${urlSearch ? `&search=${encodeURIComponent(urlSearch)}` : ''}`
           )
-        : Promise.resolve({ items: [], pagination: { total: 0, totalPages: 1 } }),
+        : Promise.resolve({ items: [], nonManualCount: 0, pagination: { total: 0, totalPages: 1 } }),
     [siteId, urlStatus, urlSearch, urlPage]
   );
 
   const evaluatedUrls: any[] = urlsQ.data?.items ?? [];
+  const nonManualCount: number = urlsQ.data?.nonManualCount || 0;
   const totalPages = urlsQ.data?.pagination?.totalPages || 1;
   const totalEvaluated = urlsQ.data?.pagination?.total || 0;
+
+  const enteredUrlCount = addUrlsText
+    .split(/\r?\n/)
+    .flatMap(l => {
+      const t = l.trim();
+      return t ? t.split(/,\s*(?=https?:\/\/|\/)/i) : [];
+    })
+    .map(s => s.trim())
+    .filter(Boolean).length;
 
   // Trigger manual site check
   const handleCheckNow = async () => {
     if (!siteId) return;
     setChecking(true);
     try {
-      const res = await call('/api/indexability/check', 'POST', { siteId: Number(siteId), maxPages: 50 });
+      const res = await call('/api/indexability/check', 'POST', { siteId: Number(siteId), maxPages: 100 });
       const sm = res.summary;
       toast(
         `Crawled ${sm.checkedCount} URLs: ${sm.indexableCount} technically indexable, ${sm.noindexCount} noindex, ${sm.canonicalIssuesCount} canonical issues.`
@@ -115,21 +128,66 @@ export default function IndexabilityMonitor() {
     }
   };
 
-  // Add single URL
-  const handleAddManualUrl = async (e: React.FormEvent) => {
+  // Add one or multiple URLs
+  const handleAddManualUrls = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addUrlInput.trim() || !siteId) return;
+    if (!addUrlsText.trim() || !siteId) return;
     setAddingUrl(true);
     try {
-      await call('/api/indexability/urls', 'POST', { siteId: Number(siteId), url: addUrlInput.trim() });
-      toast('URL added and evaluated successfully.');
-      setAddUrlInput('');
+      const res = await call('/api/indexability/urls', 'POST', {
+        siteId: Number(siteId),
+        urls: addUrlsText,
+        crawlNow
+      });
+      if (res.pendingCount > 0) {
+        toast(
+          `Saved ${res.totalSubmitted} URL(s) (${res.addedCount} new): ${res.crawledCount} crawled, ${res.pendingCount} queued as Pending.`
+        );
+      } else if (crawlNow) {
+        toast(`Saved ${res.totalSubmitted} URL(s) (${res.addedCount} new) and crawled ${res.crawledCount}.`);
+      } else {
+        toast(`Added ${res.addedCount} new URL(s) (${res.existingCount} already tracked) as Pending.`);
+      }
+      setAddUrlsText('');
       setShowAddModal(false);
+      setUrlPage(1);
       await Promise.all([indexQ.reload(true as any), urlsQ.reload(true as any)]);
     } catch (err: any) {
-      toast(err?.message || 'Failed to add URL', 'err');
+      toast(err?.message || 'Failed to add URLs', 'err');
     } finally {
       setAddingUrl(false);
+    }
+  };
+
+  const handleRemoveUrl = async (pageId: number) => {
+    if (!siteId) return;
+    setRemovingId(pageId);
+    try {
+      await call(`/api/indexability/urls/${pageId}?siteId=${siteId}`, 'DELETE');
+      toast('URL removed from indexability tracking.');
+      await Promise.all([indexQ.reload(true as any), urlsQ.reload(true as any)]);
+    } catch (err: any) {
+      toast(err?.message || 'Failed to remove URL', 'err');
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const handleClearAutoUrls = async () => {
+    if (!siteId) return;
+    if (!window.confirm(`Remove all ${nonManualCount} auto-discovered sitemap/root URLs? Your manually added URLs will be kept.`)) {
+      return;
+    }
+    setClearingAuto(true);
+    try {
+      const res = await call(`/api/indexability/urls?siteId=${siteId}&scope=non_manual`, 'DELETE');
+      toast(`Removed ${res.removedCount} auto-added URL(s).`);
+      setUrlPage(1);
+      await Promise.all([indexQ.reload(true as any), urlsQ.reload(true as any)]);
+    } catch (err: any) {
+      toast(err?.message || 'Failed to clear auto-added URLs', 'err');
+    } finally {
+      setClearingAuto(false);
     }
   };
 
@@ -176,7 +234,7 @@ export default function IndexabilityMonitor() {
           {canWrite && (
             <>
               <Btn kind="ghost" onClick={() => setShowAddModal(true)} disabled={!siteId}>
-                + Add URL
+                + Add URLs
               </Btn>
               <Btn onClick={handleCheckNow} busy={checking} disabled={!siteId}>
                 ▶ Check URLs Now
@@ -304,7 +362,14 @@ export default function IndexabilityMonitor() {
           {tab === 'urls' && (
             <Card
               title="Monitored URLs Indexability Assessment"
-              subtitle="Detailed breakdown of HTTP status, robots directives, and canonical alignment for every discovered page."
+              subtitle="Detailed breakdown of HTTP status, robots directives, and canonical alignment for your manually added URLs."
+              actions={
+                canWrite && nonManualCount > 0 ? (
+                  <Btn kind="ghost" onClick={handleClearAutoUrls} busy={clearingAuto} style={{ fontSize: 12 }}>
+                    Remove Auto-Added ({nonManualCount})
+                  </Btn>
+                ) : undefined
+              }
               flush
             >
               {/* Filter & Search Bar */}
@@ -346,16 +411,16 @@ export default function IndexabilityMonitor() {
                 <Skeleton rows={5} />
               ) : evaluatedUrls.length === 0 ? (
                 <Empty
-                  title="No URLs found"
+                  title={urlSearch || urlStatus ? 'No URLs found' : 'No URLs added yet'}
                   text={
                     urlSearch || urlStatus
                       ? 'No evaluated URLs match the selected filter criteria.'
-                      : 'No candidate URLs have been evaluated yet. Run a check to seed and inspect pages.'
+                      : 'Add the exact URLs you want to monitor (1, 5, 40, etc.). URLs are not added automatically from sitemaps.'
                   }
                   action={
                     canWrite && !urlSearch && !urlStatus ? (
-                      <Btn onClick={handleCheckNow} busy={checking}>
-                        ▶ Run Indexability Check
+                      <Btn onClick={() => setShowAddModal(true)}>
+                        + Add URLs
                       </Btn>
                     ) : undefined
                   }
@@ -486,13 +551,25 @@ export default function IndexabilityMonitor() {
 
                           {/* Actions */}
                           <td>
-                            <Btn
-                              kind="ghost"
-                              style={{ padding: '4px 10px', fontSize: 12 }}
-                              onClick={() => setSelectedPageId(item.id)}
-                            >
-                              History
-                            </Btn>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <Btn
+                                kind="ghost"
+                                style={{ padding: '4px 10px', fontSize: 12 }}
+                                onClick={() => setSelectedPageId(item.id)}
+                              >
+                                History
+                              </Btn>
+                              {canWrite && (
+                                <Btn
+                                  kind="danger"
+                                  style={{ padding: '4px 10px', fontSize: 12 }}
+                                  busy={removingId === item.id}
+                                  onClick={() => handleRemoveUrl(item.id)}
+                                >
+                                  Remove
+                                </Btn>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -682,33 +759,69 @@ export default function IndexabilityMonitor() {
         </Modal>
       )}
 
-      {/* Add Manual URL Modal */}
+      {/* Add Manual URL(s) Modal */}
       {showAddModal && (
         <Modal
-          title="Add Custom URL for Indexability Tracking"
+          title="Add URLs for Indexability Tracking"
           onClose={() => setShowAddModal(false)}
+          wide
         >
-          <form onSubmit={handleAddManualUrl}>
+          <form onSubmit={handleAddManualUrls}>
             <Field
-              label="Page URL"
-              hint={`Enter the full URL matching website domain (${currentSite?.url || 'https://example.com'}).`}
+              label="Page URLs (one per line — add 1, 5, 40, or up to 200 URLs)"
+              hint={`Only URLs you add here are monitored for ${currentSite?.url || 'this website'}. Full URLs or /paths are supported.`}
             >
-              <Input
-                type="url"
+              <textarea
+                className="sw-input"
+                rows={8}
                 required
-                placeholder="https://example.com/important-page"
-                value={addUrlInput}
-                onChange={e => setAddUrlInput(e.target.value)}
+                placeholder={`${currentSite?.url || 'https://example.com/'}\n${(currentSite?.url || 'https://example.com').replace(/\/+$/, '')}/pricing\n/about`}
+                value={addUrlsText}
+                onChange={e => setAddUrlsText(e.target.value)}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
             </Field>
 
-            <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <Btn kind="ghost" type="button" onClick={() => setShowAddModal(false)}>
-                Cancel
-              </Btn>
-              <Btn type="submit" busy={addingUrl}>
-                Add & Crawl Immediately
-              </Btn>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 12,
+                fontSize: 13,
+                cursor: 'pointer'
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={crawlNow}
+                onChange={e => setCrawlNow(e.target.checked)}
+              />
+              <span>Crawl added URLs immediately (any overflow stays queued as Pending)</span>
+            </label>
+
+            <div
+              style={{
+                marginTop: 20,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 10
+              }}
+            >
+              <span className="small muted">
+                {enteredUrlCount} URL{enteredUrlCount === 1 ? '' : 's'} entered
+              </span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Btn kind="ghost" type="button" onClick={() => setShowAddModal(false)}>
+                  Cancel
+                </Btn>
+                <Btn type="submit" busy={addingUrl} disabled={enteredUrlCount === 0}>
+                  {crawlNow
+                    ? `Add & Crawl ${enteredUrlCount || ''} URL${enteredUrlCount === 1 ? '' : 's'}`
+                    : `Add ${enteredUrlCount || ''} URL${enteredUrlCount === 1 ? '' : 's'}`}
+                </Btn>
+              </div>
             </div>
           </form>
         </Modal>

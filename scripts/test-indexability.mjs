@@ -6,7 +6,8 @@ import {
   extractCanonicals,
   evaluateCanonical,
   parseDirectiveTokens,
-  normalizeUrlForComparison
+  normalizeUrlForComparison,
+  parseManualUrlInputs
 } from '../modules/indexability/parser.ts';
 
 let passedTests = 0;
@@ -341,6 +342,33 @@ test('13. Minified HTML canonical and meta robots extraction', () => {
   const compactMeta = extractMetaRobotsFromHtml(adjacentAttrsHtml);
   assert.strictEqual(compactMeta.metaRobots, 'index,follow');
   assert.deepStrictEqual(extractCanonicals(adjacentAttrsHtml), ['https://example.com/compact']);
+});
+
+// 14. Manual Single & Bulk URL Input Parsing (1, 5, 40 URLs)
+test('14. Manual single and bulk URL list parsing & validation', () => {
+  const bulk40 = Array.from({ length: 40 }, (_, i) => `https://example.com/page-${i + 1}`).join('\n');
+  const parsed40 = parseManualUrlInputs(bulk40, 'https://example.com/');
+  assert.strictEqual(parsed40.errors.length, 0);
+  assert.strictEqual(parsed40.urls.length, 40);
+
+  const mixed = parseManualUrlInputs(
+    'https://example.com/pricing\n/about, /contact\nhttps://example.com/pricing\n',
+    'https://example.com/home'
+  );
+  assert.strictEqual(mixed.errors.length, 0);
+  assert.deepStrictEqual(mixed.urls, [
+    'https://example.com/pricing',
+    'https://example.com/about',
+    'https://example.com/contact'
+  ]);
+
+  const wrongOrigin = parseManualUrlInputs('https://other-domain.com/test', 'https://example.com');
+  assert.ok(wrongOrigin.errors.length > 0);
+  assert.strictEqual(wrongOrigin.urls.length, 0);
+
+  const invalidSyntax = parseManualUrlInputs('not-a-valid-url', 'https://example.com');
+  assert.ok(invalidSyntax.errors.length > 0);
+  assert.strictEqual(invalidSyntax.urls.length, 0);
 });
 
 console.log(`\nResults: ${passedTests}/${totalTests} tests passed.`);
