@@ -16,7 +16,12 @@ export type ApiCtx = { req: NextRequest; user: SessionUser; params: Record<strin
 export type PublicCtx = Omit<ApiCtx, 'user'>;
 
 function fail(e: unknown) {
-  if (e instanceof ApiError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
+  if (e instanceof ApiError) {
+    if (e.status >= 400) {
+      console.error(`[SiteWatch API ${e.status}]:`, e.message);
+    }
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
+  }
   const err = e as { code?: string };
   if (err?.code === 'ER_DUP_ENTRY') return NextResponse.json({ error: 'That value already exists.', code: 'duplicate' }, { status: 409 });
   console.error('[SiteWatch] Unhandled API error:', e);

@@ -11,6 +11,7 @@ Hostinger Business Node.js hosting (Next.js 15 App Router, React 19, TypeScript,
 | Projects | Projects with client details, logo, status, members, project-level monitoring defaults and per-website overrides |
 | Monitoring | One cron entry point, due-task scheduler, per-site interval / timeout / retries / method / status codes / alerts / maintenance window, incidents with timeline and email history |
 | Speed Test | Google PageSpeed Insights, mobile and desktop, saved history, custom comparison (two audits, two dates, last two), one-time / recurring / custom-sequence schedules |
+| AI Cold Email Generator | Personalized human-style cold emails, subject lines, multi-touch follow-ups (Day 3/7/14), live website context extraction with SSRF protection, anti-AI sanitization, and 7-day retention |
 | Reports | PDF per website or project, presets or custom range, selectable sections, download or email to several recipients, scheduled daily / weekly / monthly / custom |
 | Audit log | Logins, project / site / monitoring / speed-test / report / user / settings actions with filters |
 | UI | Sidebar driven by `lib/nav.ts`, search, notifications, project switcher, role-aware overview, charts, modals, toasts, skeletons, responsive layout |
@@ -31,6 +32,9 @@ the real Google API, real SMTP, or a browser. Treat them as needing your accepta
 | Variable | Purpose |
 |---|---|
 | `GOOGLE_PAGESPEED_API_KEY` | Server-side key for the PageSpeed Insights API (enable "PageSpeed Insights API" in Google Cloud). Without it, Speed Test shows a clear "not configured" message |
+| `ANTHROPIC_API_KEY` | Server-side API key for the Claude Messages API (AI Cold Email Generator). Never exposed to frontend |
+| `CLAUDE_COLD_EMAIL_MODEL` | Claude model identifier (default `claude-opus-5-5`) |
+| `COLD_EMAIL_RATE_LIMIT_PER_HOUR` | Per-user generation rate limit per hour (default `30`) |
 | `ADMIN_EMAIL` | Email for the bootstrapped Master Admin |
 | `PAGESPEED_API_BASE` | Optional, testing only: override the Google endpoint |
 | `AUTH_SECRET` | No longer used |
@@ -72,7 +76,8 @@ Engine limits (concurrency, sites per run, time budget) are rows in `system_sett
 `GET|PATCH|DELETE /api/sites/:id`, `GET /api/sites/:id/history` (status, from, to, before, limit), `GET|POST /api/users`,
 `GET|PATCH|DELETE /api/users/:id`, `GET /api/activity`, `GET|POST /api/cron/check`, `GET /api/cron/logs`, `GET /api/overview`, `GET /api/search`, `GET|PATCH /api/settings`, `PATCH /api/auth/profile`,
 `GET /api/sites/:id/series`, `GET|POST /api/speedtest`, `GET /api/speedtest/:id`, `GET /api/speedtest/compare`, `GET|POST /api/speedtest/schedules`, `PATCH|DELETE /api/speedtest/schedules/:id`,
-`GET|POST /api/reports`, `GET /api/reports/:id/download`, `POST /api/reports/email`, `GET|POST /api/reports/schedules`, `PATCH|DELETE /api/reports/schedules/:id`.
+`GET|POST /api/reports`, `GET /api/reports/:id/download`, `POST /api/reports/email`, `GET|POST /api/reports/schedules`, `PATCH|DELETE /api/reports/schedules/:id`,
+`POST /api/cold-email/generate`, `GET|DELETE /api/cold-email/generations`, `GET|DELETE /api/cold-email/generations/:id`.
 
 ## Security
 - Passwords: scrypt (Node built-in, no native build on managed hosting; chosen over Argon2id for that reason). Minimum 12 characters.

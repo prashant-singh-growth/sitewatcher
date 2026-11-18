@@ -15,11 +15,12 @@ export const ALL_PERMISSIONS = [
   'indexability.view', 'indexability.manage',
   'report.view', 'report.generate', 'report.email', 'report.schedule',
   'activity.view', 'user.manage', 'settings.manage', 'platform.view_all',
-  'docs.view', 'docs.manage'
+  'docs.view', 'docs.manage',
+  'cold_email.use', 'cold_email.manage'
 ] as const;
 export type Permission = typeof ALL_PERMISSIONS[number];
 
-const MEMBER: Permission[] = ['project.view', 'site.view', 'speedtest.view', 'speedtest.run', 'sitemap.view', 'robots.view', 'indexability.view', 'report.view', 'report.generate', 'docs.view'];
+const MEMBER: Permission[] = ['project.view', 'site.view', 'speedtest.view', 'speedtest.run', 'sitemap.view', 'robots.view', 'indexability.view', 'report.view', 'report.generate', 'docs.view', 'cold_email.use'];
 const DEFAULTS: Record<EffectiveRole, Set<string>> = {
   super_admin: new Set(ALL_PERMISSIONS),
   manager: new Set(ALL_PERMISSIONS.filter(p => !['user.manage', 'settings.manage', 'platform.view_all'].includes(p))),

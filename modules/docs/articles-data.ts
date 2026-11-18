@@ -109,11 +109,19 @@ export const DOC_CATEGORIES: DocCategorySeed[] = [
     minRole: 'manager'
   },
   {
+    slug: 'ai-tools',
+    title: 'AI Tools & Outreach',
+    description: 'Personalized AI cold email generation, anti-AI sanitization, 7-day retention, and Claude model configuration.',
+    icon: 'mail',
+    displayOrder: 10,
+    minRole: 'member'
+  },
+  {
     slug: 'troubleshooting',
     title: 'Troubleshooting & Glossary',
     description: 'Diagnosing common monitoring errors, false positive handling, and SEO technical terms.',
     icon: 'clock',
-    displayOrder: 10,
+    displayOrder: 11,
     minRole: 'member'
   }
 ];
@@ -1059,6 +1067,63 @@ Quick reference for technical terms used throughout the SiteWatch platform.
 - **Technical Indexability**: Confirmation that a page returns HTTP 200, lacks noindex directives, and has clean canonical tags so crawlers are technically capable of indexing it.
 - **TTFB (Time to First Byte)**: Duration from the initial HTTP request until the first byte of response data is received from the server.
 - **X-Robots-Tag**: An HTTP response header used to deliver robots directives (e.g. \`noindex\`, \`noarchive\`) for non-HTML files such as PDFs or programmatic endpoints.
+`
+  },
+  {
+    slug: 'cold-email-generator',
+    categorySlug: 'ai-tools',
+    title: 'AI Cold Email Generator & Sequence Guide',
+    summary: 'How to generate personalized, human-sounding cold emails, subject lines, multi-touch follow-ups, and manage 7-day retention.',
+    minRole: 'member',
+    displayOrder: 1,
+    readTimeMinutes: 5,
+    relatedSlugs: ['technical-seo-glossary', 'website-monitoring-configuration'],
+    contentMd: `# AI Cold Email Generator & Outreach Sequence Guide
+
+SiteWatch includes a built-in **AI Cold Email Generator** powered by Claude. It generates personalized cold outreach emails, high-converting subject lines, and multi-touch follow-up sequences from whatever information you provide.
+
+---
+
+### Core Principles
+
+1. **Every Field is Optional**:
+   - Provide as much or as little detail as you have: company name, website URL, prospect name, role, business pain points, your offer, sender details, tone, and length.
+   - At least one field must be populated to trigger generation.
+
+2. **No Hallucinated Facts**:
+   - If information is missing, Claude will never invent fake funding rounds, awards, or mutual connections. Clean placeholders like \`{{first_name}}\` and \`{{company}}\` are used when needed.
+
+3. **Human-Style Writing (Anti-AI Guardrails)**:
+   - Automated sanitization strips AI telltale markers: em dashes (\`—\`), en dashes (\`–\`), marketing buzzwords (*delve, leverage, streamline, game-changer, unlock*), emojis, and semicolons.
+   - Short sentences, contractions (\`I'm\`, \`you're\`), and one clear low-friction call-to-action.
+
+4. **Live Website Copy Fetching**:
+   - If you provide a company website URL, SiteWatch securely fetches visible copy (title, meta description, key headings, text snippet) server-side using connect-time SSRF protection and passes it as context to Claude.
+   - If the site is slow or unreachable, generation continues gracefully without crashing.
+
+5. **7-Day Retention & Privacy**:
+   - Saved generations are private to your user account and automatically expire after **7 days**.
+   - An automated background cleanup job purges expired rows from the database.
+
+---
+
+### Configuration & Environment Variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| \`ANTHROPIC_API_KEY\` | Server-side key for the Claude Messages API | Required |
+| \`CLAUDE_COLD_EMAIL_MODEL\` | Model ID used for cold email generation | \`claude-opus-5-5\` |
+| \`COLD_EMAIL_RATE_LIMIT_PER_HOUR\` | Maximum generations allowed per user per hour | \`30\` |
+
+---
+
+### API Endpoints
+
+- \`POST /api/cold-email/generate\`: Generates emails, subject lines, and follow-ups.
+- \`GET /api/cold-email/generations\`: Returns paginated history of non-expired generations for the authenticated user.
+- \`GET /api/cold-email/generations/:id\`: Retrieves a single past generation.
+- \`DELETE /api/cold-email/generations/:id\`: Deletes a single generation.
+- \`DELETE /api/cold-email/generations\`: Clears all cold email history for the user.
 `
   }
 ];

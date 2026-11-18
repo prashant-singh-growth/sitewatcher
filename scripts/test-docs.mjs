@@ -22,10 +22,10 @@ function test(name, fn) {
 console.log('--- Running SiteWatch Documentation & Help Center Test Suite ---\n');
 
 // 1. Category Data Integrity
-test('1. Documentation categories integrity (10 categories defined)', () => {
-  assert.strictEqual(DOC_CATEGORIES.length, 10);
+test('1. Documentation categories integrity (11 categories defined)', () => {
+  assert.strictEqual(DOC_CATEGORIES.length, 11);
   const slugs = new Set(DOC_CATEGORIES.map(c => c.slug));
-  assert.strictEqual(slugs.size, 10);
+  assert.strictEqual(slugs.size, 11);
   assert.ok(slugs.has('getting-started'));
   assert.ok(slugs.has('dashboard'));
   assert.ok(slugs.has('websites'));
@@ -36,11 +36,12 @@ test('1. Documentation categories integrity (10 categories defined)', () => {
   assert.ok(slugs.has('reports'));
   assert.ok(slugs.has('administration'));
   assert.ok(slugs.has('troubleshooting'));
+  assert.ok(slugs.has('ai-tools'));
 });
 
 // 2. Article Data Integrity & Category Mapping
-test('2. Documentation articles integrity (25 comprehensive articles)', () => {
-  assert.strictEqual(DOC_ARTICLES.length, 25);
+test('2. Documentation articles integrity (26 comprehensive articles)', () => {
+  assert.strictEqual(DOC_ARTICLES.length, 26);
   const catSlugs = new Set(DOC_CATEGORIES.map(c => c.slug));
   const articleSlugs = new Set();
 

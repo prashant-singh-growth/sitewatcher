@@ -13,6 +13,8 @@ export const NAV: NavSection[] = [
     { label: 'Sitemaps', href: '/sitemaps', icon: 'file' },
     { label: 'Robots.txt', href: '/robots-txt', icon: 'shield' },
     { label: 'Indexability', href: '/indexability', icon: 'search' } ] },
+  { title: 'AI Tools', items: [
+    { label: 'Cold Email Generator', href: '/cold-email', icon: 'mail' } ] },
   { title: 'Analytics', items: [
     { label: 'Reports', href: '/reports', icon: 'file' },
     { label: 'Performance History', href: '/performance', icon: 'chart' },

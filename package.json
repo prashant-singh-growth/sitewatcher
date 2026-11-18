@@ -14,7 +14,8 @@
     "test:robots": "node --experimental-strip-types scripts/test-robots.mjs",
     "test:indexability": "node --experimental-strip-types scripts/test-indexability.mjs",
     "test:docs": "node --experimental-strip-types scripts/test-docs.mjs",
-    "test": "node --experimental-strip-types scripts/test-sitemaps.mjs && node --experimental-strip-types scripts/test-robots.mjs && node --experimental-strip-types scripts/test-indexability.mjs && node --experimental-strip-types scripts/test-docs.mjs",
+    "test:cold-email": "node --experimental-strip-types scripts/test-cold-email.mjs",
+    "test": "node --experimental-strip-types scripts/test-sitemaps.mjs && node --experimental-strip-types scripts/test-robots.mjs && node --experimental-strip-types scripts/test-indexability.mjs && node --experimental-strip-types scripts/test-docs.mjs && node --experimental-strip-types scripts/test-cold-email.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

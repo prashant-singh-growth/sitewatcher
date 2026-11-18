@@ -43,4 +43,10 @@ DNS check when a URL is saved, and a lookup hook used at connect time so the con
 Permissions go in `role_permissions` (and `ALL_PERMISSIONS` in `lib/rbac.ts`).
 
 ## Cron request order
-uptime checks (priority) -> due speed-test schedules (skipped after 50 s) -> due sitemap checks (skipped after 40 s) -> due robots.txt checks (skipped after 35 s) -> due indexability checks (skipped after 40 s) -> due report emails (skipped after 70 s).
+uptime checks (priority) -> due speed-test schedules (skipped after 50 s) -> due sitemap checks (skipped after 40 s) -> due robots.txt checks (skipped after 35 s) -> due indexability checks (skipped after 40 s) -> due report emails (skipped after 70 s) -> purge expired cold emails (7-day retention).
+
+## AI Cold Email Generator
+- Module: `modules/cold-email/` (prompt, sanitizer, website, client, service).
+- Table: `cold_email_generations` (user_id, inputs JSON, outputs JSON, model_used, created_at, expires_at = created_at + 7 days).
+- Privacy & Isolation: Filtered strictly by `user_id = ? AND expires_at > UTC_TIMESTAMP(3)` at query level.
+- Automated 7-Day Purge: `purgeExpiredColdEmails()` runs every minute in `/api/cron/check` and deletes rows where `expires_at <= UTC_TIMESTAMP(3)`.

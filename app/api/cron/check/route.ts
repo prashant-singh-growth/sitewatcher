@@ -6,6 +6,7 @@ import { runDueReports } from '@/modules/reports/service';
 import { runDueSitemaps } from '@/modules/sitemaps/service';
 import { runDueRobotsChecks } from '@/modules/robots/service';
 import { runDueIndexabilityChecks } from '@/modules/indexability/service';
+import { purgeExpiredColdEmails } from '@/modules/cold-email/service';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 110;
 
@@ -30,6 +31,7 @@ async function handler(req: NextRequest) {
     try { extras.robots = await runDueRobotsChecks(started); } catch (e) { console.error('[SiteWatch] robots dispatch failed:', e); extras.robots = { error: true }; }
     try { extras.indexability = await runDueIndexabilityChecks(new Date(started)); } catch (e) { console.error('[SiteWatch] indexability dispatch failed:', e); extras.indexability = { error: true }; }
     try { extras.reports = await runDueReports(started); } catch (e) { console.error('[SiteWatch] report dispatch failed:', e); extras.reports = { error: true }; }
+    try { extras.purgedColdEmails = await purgeExpiredColdEmails(); } catch (e) { console.error('[SiteWatch] cold-email purge failed:', e); }
     return NextResponse.json({ ok: true, ...monitoring, ...extras, timestamp: new Date().toISOString() });
   } catch (e) { console.error('[SiteWatch] Cron check failed:', e); return NextResponse.json({ error: 'Monitoring run failed.' }, { status: 500 }); }
 }
